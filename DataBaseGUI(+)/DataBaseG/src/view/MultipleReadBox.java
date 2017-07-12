@@ -24,10 +24,10 @@ public class MultipleReadBox {
 	private MultipleReadBox(){
 	}
 
-	public static ArrayList<String> display(String title, String inputText, Boolean repetitionsAlowed) {
+	public static ArrayList<String> display(String title, String inputText, Boolean repetitionsAlowed, String key) {
 		ArrayList<String> temp_array = new ArrayList<String>();
 		main_flag=true;
-		temp_array.clear();
+		temp_array.add(key);
 		Stage window = new Stage();
 		window.initModality(Modality.APPLICATION_MODAL);
 		window.setTitle(title);
@@ -46,8 +46,7 @@ public class MultipleReadBox {
 			if (temp.isEmpty()==true){
 				AlertBox.display("Error", "Empty field!");
 			}
-			else
-			{
+			else{
 				if (repetitionsAlowed == false){
 					for (String column_name : temp_array){
 						if (column_name.equals(temp)){

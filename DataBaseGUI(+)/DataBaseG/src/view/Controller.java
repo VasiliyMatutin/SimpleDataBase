@@ -1,6 +1,6 @@
 package view;
 
-import model.Table;
+import model.TableBook;
 import view.ReadBox;
 import view.MultipleReadBox;
 import view.ConfirmBox;
@@ -17,6 +17,8 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.Set;
 
+import collections.CollectionType;
+import hash.HashType;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
@@ -28,6 +30,7 @@ import javafx.scene.control.MenuItem;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableColumn.CellEditEvent;
 import javafx.scene.control.TableView;
+import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.scene.text.Text;
@@ -38,9 +41,10 @@ public class Controller {
 	private TableView<ArrayList<String>> table;
 	private Main mainApp;
 	private String current_file;
-	private Table tables_list;
+	private TableBook tables_list;
 	private String current_table;
 	private ObservableList<ArrayList<String>> unfiltered_table;
+	private FilteredList<ArrayList<String>> filtered_data;
 
 	public Controller(){
 		current_file = "";
@@ -54,7 +58,16 @@ public class Controller {
 	private Text table_name;
 
 	@FXML
+	private Text collection_name;
+
+	@FXML
+	private Text hash_name;
+
+	@FXML
 	private Menu table_change;
+
+	@FXML
+	private Menu tables_menu;
 
 	@FXML
 	private Menu edit_menu;
@@ -73,6 +86,9 @@ public class Controller {
 
 	@FXML
 	private TextField search_field;
+	
+	@FXML
+	private TextArea history;
 
 	@FXML
 	private void initialize() {
@@ -80,12 +96,34 @@ public class Controller {
 		table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
 		table.setEditable(true);
 		unfiltered_table = table.getItems();
-		
+
 		switch_search_column.setOnAction(e -> {
 			String curr_value = search_field.getText();
 			search_field.clear();
 			search_field.setText(curr_value);
+		});
+		
+		filtered_data = new FilteredList<>(unfiltered_table, p -> true);
+		search_field.textProperty().addListener((observable, oldValue, newValue) -> {
+			if (switch_search_column.getValue().equals(tables_list.getColumnsName(current_table).get(0)) && newValue.isEmpty() == false){
+				try{
+					long start = System.nanoTime();
+					tables_list.searchRowByKey(current_table, newValue);
+					long time = System.nanoTime() - start;
+					history.appendText("Time: " + time + "(ns) " + "Find node " + newValue + " in collection:" + collection_name.getText() + " with hashfunction:" + hash_name.getText() +  '\n');		
+				}catch(RuntimeException ex){}
+			}
+			filtered_data.setPredicate(row -> {
+				if (newValue == null || newValue.isEmpty()) {
+					return true;
+				}
+
+				if (row.get(tables_list.getColumnNumber(current_table, switch_search_column.getValue())).toLowerCase().equals(newValue.toLowerCase())) {
+					return true; 
+				} 
+				return false;
 			});
+		});
 	}
 
 	@FXML
@@ -103,16 +141,26 @@ public class Controller {
 				if (tables_list.isTableExist(table_name) == true){
 					throw new RuntimeException("Table with such name already exists!");
 				}
-				ArrayList<String> table_columns = MultipleReadBox.display("Add column", "Enter column name:", false);
+				String Key = ReadBox.display("Create key value", "Enter key name:");
+				if (ReadBox.isClosedManually()==true){
+					return;
+				}
+				if (table_name.isEmpty()==true){
+					throw new RuntimeException("Empty field");
+				}
+				ArrayList<String> table_columns = MultipleReadBox.display("Add column", "Enter column name:", false, Key);
 				if (MultipleReadBox.isClosedManually()==true){
 					return;
 				}
 				if (table_columns.isEmpty()==true){
 					throw new RuntimeException("No columns has been created!");
-				}		
+				}
+				table_columns.set(0, Key + " (unique key)");
 				tables_list.addNewTable(table_name, table_columns);
-				writeValueToLocalTable();
 				current_table=table_name;
+				collection_name.setText(tables_list.getCollectionName(current_table));
+				hash_name.setText(tables_list.getHashName(current_table));
+				this.table_name.setText(current_table);
 
 				MenuItem menu_item = new MenuItem(table_name);
 				menu_item.setOnAction(e -> switchTable(menu_item.getText()));
@@ -123,10 +171,12 @@ public class Controller {
 						table_change.setDisable(false);
 					}
 					mainApp.getRootLayout().setRight(table_edit);
+
+					if (table_change.getItems().size()>0){
+						edit_menu.setDisable(false);
+					}
+					drawTable();
 				}
-
-				drawTable();
-
 				return;
 			} catch (RuntimeException e){
 				AlertBox.display("Error", e.getMessage());
@@ -159,7 +209,7 @@ public class Controller {
 				}
 				file.createNewFile();
 				current_file=file_name + ".txt";
-				tables_list= new Table();
+				tables_list= new TableBook();
 				activateMenuButton();
 				saveMenuClicked();
 				return;
@@ -187,7 +237,7 @@ public class Controller {
 					FileInputStream fin = new FileInputStream(file_name + ".txt");
 					ObjectInputStream fse = new ObjectInputStream(fin);
 					) {
-				tables_list = (Table)fse.readObject();
+				tables_list = (TableBook)fse.readObject();
 				current_file=file_name + ".txt";
 				activateMenuButton();
 				Set<String> table_names = tables_list.getTablesName();
@@ -210,9 +260,6 @@ public class Controller {
 
 	@FXML
 	private void saveMenuClicked(){
-		if (current_table.isEmpty()==false){
-			writeValueToLocalTable();
-		}
 		try(
 				FileOutputStream fot = new FileOutputStream(current_file);
 				ObjectOutputStream fseo = new ObjectOutputStream(fot);
@@ -289,6 +336,7 @@ public class Controller {
 			if (table_names.isEmpty()==true){
 				current_table="";
 				mainApp.getRootLayout().setRight(null);
+				edit_menu.setDisable(true);
 			} else{
 				if (table_names.size()==1){
 					table_change.setDisable(true);
@@ -322,10 +370,19 @@ public class Controller {
 				}
 			}
 		}
-		unfiltered_table.add(rows_value);
-		if (delete_button.isDisable()==true){
-			delete_button.setDisable(false);
-			search_field.setDisable(false);
+		try{
+			long start = System.nanoTime();
+			tables_list.addRowToTable(current_table, rows_value);
+			long time = System.nanoTime() - start;
+			history.appendText("Time: " + time + "(ns) " + "Add in collection:" + collection_name.getText() + " with hashfunction:" + hash_name.getText() +  '\n');
+			unfiltered_table.add(rows_value);
+			if (delete_button.isDisable()==true){
+				delete_button.setDisable(false);
+				search_field.setDisable(false);
+			}
+		}
+		catch (RuntimeException ex){
+			AlertBox.display("Error", ex.getMessage());
 		}
 		return;
 	}
@@ -334,6 +391,9 @@ public class Controller {
 	private void deleteRow(){
 		ObservableList<ArrayList<String>> rowSelected;
 		rowSelected = table.getSelectionModel().getSelectedItems();
+		for (ArrayList<String> row : rowSelected){
+			tables_list.deleteRowFromTable(current_table, row);
+		}
 		rowSelected.forEach(unfiltered_table::remove);
 		if (unfiltered_table.isEmpty()==true){
 			delete_button.setDisable(true);
@@ -341,22 +401,55 @@ public class Controller {
 		}
 	}
 
-	private void writeValueToLocalTable(){
-		if (current_table.isEmpty()==false){
-			ArrayList<ArrayList<String>> current_table_state = new ArrayList<ArrayList<String>>();
-			for (ArrayList<String> row : unfiltered_table){
-				current_table_state.add(row);
-			}
-			tables_list.setCurrentTableValue(current_table_state, current_table);
-		}
+	@FXML
+	private void changeToSetCollection(){
+		tables_list.changeCollection(current_table, CollectionType.SET, null);
+		collection_name.setText(tables_list.getCollectionName(current_table));
+	}
+
+	@FXML
+	private void changeToMapCollection(){
+		tables_list.changeCollection(current_table, CollectionType.MAP, null);
+		collection_name.setText(tables_list.getCollectionName(current_table));
+	}
+
+	@FXML
+	private void changeToListCollection(){
+		tables_list.changeCollection(current_table, CollectionType.LIST, null);
+		collection_name.setText(tables_list.getCollectionName(current_table));
+	}
+	
+	@FXML
+	private void changeToStandartHash(){
+		tables_list.changeHashInTable(current_table, HashType.STANDART);
+		hash_name.setText(tables_list.getHashName(current_table));
+	}
+
+	@FXML
+	private void changeToH37Hash(){
+		tables_list.changeHashInTable(current_table, HashType.H37);
+		hash_name.setText(tables_list.getHashName(current_table));
+	}
+
+	@FXML
+	private void changeToLyHash(){
+		tables_list.changeHashInTable(current_table, HashType.LY);
+		hash_name.setText(tables_list.getHashName(current_table));
+	}
+	
+	@FXML
+	private void changeToRsHash(){
+		tables_list.changeHashInTable(current_table, HashType.RS);
+		hash_name.setText(tables_list.getHashName(current_table));
 	}
 
 	private void switchTable(String new_table){
 		if (new_table.equals(current_table)){
 			return;
 		}
-		writeValueToLocalTable();
 		current_table=new_table;
+		collection_name.setText(tables_list.getCollectionName(current_table));
+		hash_name.setText(tables_list.getHashName(current_table));
 		drawTable();
 	}
 
@@ -386,9 +479,20 @@ public class Controller {
 			column.setCellFactory(TextFieldTableCell.<ArrayList<String>>forTableColumn());
 			column.setOnEditCommit(
 					(CellEditEvent<ArrayList<String>, String> t) -> {
-						t.getTableView().getItems().get(
-								t.getTablePosition().getRow()
-								).set(ind, t.getNewValue());
+						if (t.getTablePosition().getTableColumn().getText().equals(columns_name.get(0))){
+							try{
+								String old_key = t.getTableView().getItems().get(t.getTablePosition().getRow()).get(ind);
+								tables_list.editKeyInTable(current_table, old_key, t.getNewValue());
+								t.getTableView().getItems().get(t.getTablePosition().getRow()).set(ind, t.getNewValue());
+							}catch(RuntimeException ex){
+								AlertBox.display("Error", ex.getMessage());
+								table.refresh();
+							}
+						}
+						else{
+							t.getTableView().getItems().get(t.getTablePosition().getRow()).set(ind, t.getNewValue());
+							tables_list.editRowInTable(current_table, t.getTableView().getItems().get(t.getTablePosition().getRow()));
+						}
 					});
 			switch_search_column.getItems().add(columns_name.get(ind));
 		}
@@ -397,24 +501,8 @@ public class Controller {
 		for (ArrayList<String> row : values){
 			unfiltered_table.add(row);
 		}
-
-		///
-		FilteredList<ArrayList<String>> filtered_data = new FilteredList<>(unfiltered_table, p -> true);
-		search_field.textProperty().addListener((observable, oldValue, newValue) -> {
-			filtered_data.setPredicate(row -> {
-				if (newValue == null || newValue.isEmpty()) {
-					return true;
-				}
-
-				if (row.get(tables_list.getColumnNumber(current_table, switch_search_column.getValue())).toLowerCase().equals(newValue.toLowerCase())) {
-					return true; 
-				} 
-				return false;
-			});
-		});
-
+		
 		table.setItems(filtered_data);
-		////
 
 		if (values.isEmpty()==false){
 			delete_button.setDisable(false);
@@ -434,21 +522,27 @@ public class Controller {
 		if (table_names.size()>1){
 			table_change.setDisable(false);
 		}
+		if (table_names.size()>0){
+			edit_menu.setDisable(false);
+		}
 		Iterator<String> iter = table_names.iterator();
 		current_table = iter.next();
 		mainApp.getRootLayout().setRight(table_edit);
+		collection_name.setText(tables_list.getCollectionName(current_table));
+		hash_name.setText(tables_list.getHashName(current_table));
 		drawTable();
 	}
 
 	private void activateMenuButton(){
 		save_button.setDisable(false);
 		close_button.setDisable(false);
-		edit_menu.setDisable(false);
+		tables_menu.setDisable(false);
 	}
 
 	private void deactivateMenuButton(){
 		save_button.setDisable(true);
 		close_button.setDisable(true);
+		tables_menu.setDisable(true);
 		edit_menu.setDisable(true);
 		table_change.getItems().clear();
 		table_change.setDisable(true);
@@ -460,5 +554,16 @@ public class Controller {
 
 	public void setMain(Main mainApp) {
 		this.mainApp = mainApp;
+	}
+	
+	@FXML
+	private void autoFill(){
+		for (Integer i=0; i < 10000; i++){
+			ArrayList<String> temp = new ArrayList<String>();
+			temp.add(i.toString());
+			temp.add("def");
+			temp.add("def");
+			tables_list.addRowToTable(current_table, temp);
+		}
 	}
 }
